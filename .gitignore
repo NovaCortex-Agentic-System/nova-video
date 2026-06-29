@@ -1,0 +1,12 @@
+# Secrete și configurație locală
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# Date runtime (generate la rulare, nu fac parte din template)
+memory/*.md
+state/
+
+# macOS
+.DS_Store
