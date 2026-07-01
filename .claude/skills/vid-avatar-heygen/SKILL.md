@@ -1,6 +1,6 @@
 ---
 name: vid-avatar-heygen
-description: "Generează video talking head cu avatar realist via HeyGen API. Avatarul vorbește un script text cu lip sync precis. Ideal pentru prezentări, tutoriale și explicații — nu pentru reclame cinematice (acelea merg pe vid-scene-cinematic)."
+description: "Generează video cu avatar realist via HeyGen API v3. Avatarul vorbește un script în română, plasat într-o scenă reală (fundal imagine sau culoare, mișcare naturală). Nu pentru reclame cinematice fără voce — acelea merg pe vid-scene-cinematic."
 triggers:
   - "video heygen"
   - "avatar realist"
@@ -8,6 +8,9 @@ triggers:
   - "prezentare video"
   - "avatar vorbitor"
   - "lip sync"
+  - "avatar în scenă"
+  - "video cu avatar"
+  - "avatar care vorbește"
 secrets_required:
   - HEYGEN_API_KEY
 context_loads:
@@ -21,99 +24,104 @@ runtime_dependencies:
   - requests (pip install requests)
 ---
 
-# Skill: Generare Video Avatar HeyGen
+# Skill: Generare Video Avatar HeyGen v3
 
-## Pas 0: Citește contextul și selectează brandul
+## Pas 0: Identifică brandul și avatarul
 
-**Identifică brandul:**
-Dacă brief-ul nu specifică un brand, întreabă: "Pentru ce brand generăm video-ul?"
+Citește `knowledge/brand-video.md`.
 
-Citește `knowledge/brand-video.md` și găsește secțiunea brandului menționat.
+Găsește secțiunea brandului menționat. Extrage:
+- `heygen_look_id` — ID-ul avatarului persistent (dacă există)
+- `aspect_ratio`, `resolution`, culori, format preferat
 
-Dacă brandul nu e în catalog (sau catalogul e gol):
-> "Brandul [NUME] nu are configurație salvată. Cum procedăm?
-> 1. Configurăm acum: culoare subtitruri, font, format (9:16/16:9), watermark
-> 2. Folosesc default-uri: 16:9, Arial Bold, #FFD700, fără watermark"
+Dacă brandul **nu are `heygen_look_id`**:
+> "Brandul [NUME] nu are un avatar HeyGen configurat. Opțiuni:
+> 1. Creăm un avatar persistent din fotografie (recomandat) — handoff la vid-avatar-heygen-create
+> 2. Folosim un avatar din biblioteca HeyGen (fără fotografie proprie)"
 
-Dacă alege 1, cere toate 4 preferințele într-un singur mesaj și adaugă brandul în catalog:
-```bash
-cat >> "${CTX_AGENT_DIR}/knowledge/brand-video.md" << EOF
+Dacă alege 1 → transferă la `vid-avatar-heygen-create`, revino după ce look_id e salvat în catalog.
+Dacă alege 2 → continuă la Pas 1.
+Dacă brandul are look_id → sari direct la Pas 2.
 
-## [BRAND_NAME]
-- Culoare subtitruri: [CULOARE]
-- Font: [FONT]
-- Aspect ratio: [RATIO]
-- Rezoluție: [REZOLUTIE]
-- Watermark: [WATERMARK]
-EOF
-```
+## Pas 1: Selectează avatarul din biblioteca HeyGen
 
-**Citește produsul dacă e menționat în brief:**
-Dacă brief-ul menționează un produs specific care NU apare în `knowledge/produse.md`, întreabă: "Produsul [NUME] nu e în catalogul meu. Îl adăugăm acum sau continui cu o descriere generică?"
-
-## Pas 1: Selectează avatarul și vocea
-
-Verifică dacă utilizatorul a specificat deja un avatar și o voce. Dacă le-a specificat, sari direct la Pas 2.
-
-Dacă nu, listează avatarele disponibile:
+Rulează numai dacă brandul nu are look_id și utilizatorul a ales opțiunea 2.
 
 ```bash
 cd "${CTX_AGENT_DIR}"
 set -a; source .env; set +a
-python3 .claude/skills/vid-avatar-heygen/scripts/heygen_video.py --list-avatars
+python3 .claude/skills/vid-avatar-heygen/scripts/heygen_v3.py --list-avatars
 ```
 
-Prezintă primele 10 avatare (ID, nume, stil) și întreabă utilizatorul să aleagă.
+Prezintă primele 10 avatare (ID, nume). Cere alegerea.
 
-Apoi listează vocile:
+**ÎNCHEIE TURA** — nu continua fără confirmare avatar.
+
+## Pas 2: Selectează vocea în română
 
 ```bash
-python3 .claude/skills/vid-avatar-heygen/scripts/heygen_video.py --list-voices
+python3 .claude/skills/vid-avatar-heygen/scripts/heygen_v3.py --list-voices --language Romanian
 ```
 
-Filtrează vocile în română dacă există în listă. Dacă nu există voci în română, prezintă top 10 voci în engleză cu accent neutru.
+Voci române confirmate disponibile:
+- `dfea36b07588437d93e9f73c828fec5a` — Hushed Horatiu (masculin, discret)
+- `00631519159a402ab5d8f719e51532bb` — Jora Slobod (masculin)
+- `ec218e50cc9c4991894676a31e4804c5` — Emil - Natural (masculin, natural)
+- `19e93c4e7713495894a42b80fcff866c` — Alina - Natural (feminin, natural)
 
-**ÎNCHEIE TURA** — nu continua cu Pas 2 fără confirmare avatar + voce din partea utilizatorului.
+Prezintă lista și întreabă:
+> "Ce voce preferi pentru acest video? (sau îmi dai tu preferința — ex: masculin/feminin, ton calm/energic)"
 
-## Pas 2: Scrie sau primește scriptul
+**ÎNCHEIE TURA** — nu continua fără confirmare voce.
 
-Dacă utilizatorul a dat un script complet, folosește-l direct (sari la Pas 3).
+## Pas 3: Alege scena
 
-Dacă a dat un brief sau o idee, scrie scriptul respectând:
-- Max 200 cuvinte (corespunde la ~90 secunde vorbire)
+Întreabă utilizatorul:
+> "Ce fundal vrei pentru scenă?
+> 1. Culoare solidă (alb, negru, bleumarin #1a1a2e, gri #f0f0f0)
+> 2. Imagine de fundal — trimite un URL (birou, studio, exterior, etc.)
+> 3. Fără fundal specificat — HeyGen decide automat"
+
+Dacă alege 1 → cere codul hex sau sugerează variantele de mai sus.
+Dacă alege 2 → cere URL-ul imaginii (trebuie să fie public, accesibil fără autentificare).
+Dacă alege 3 → nu adăuga `--background-*` la comandă.
+
+**ÎNCHEIE TURA** — nu continua fără decizie scenă.
+
+## Pas 4: Scrie sau primește scriptul
+
+Dacă utilizatorul a dat un script complet → folosește-l direct, sari la Pas 5.
+
+Dacă a dat un brief, scrie scriptul respectând:
+- Max 200 cuvinte (~90 secunde vorbire)
 - Ton conversațional, nu formal sau marketing agresiv
-- Primele 5 cuvinte = hook care captează atenția imediat
-- Fără fraze de umplutură de tipul "Bună ziua, mă numesc..."
-- Dacă brief-ul menționează un produs din `knowledge/produse.md`, include beneficiul principal al produsului
+- Primele 5 cuvinte = hook direct, fără "Bună ziua, mă numesc..."
+- Dacă brief-ul menționează un produs din `knowledge/produse.md`, include beneficiul principal
 
 Prezintă scriptul și cere confirmare:
-> "Iată scriptul propus ([N] cuvinte, ~[M] secunde). Confirmi sau îl ajustăm?"
+> "Iată scriptul ([N] cuvinte, ~[M] secunde). Confirmi sau ajustăm?"
 
-**Nu continua la Pas 3 fără confirmare explicită pe script.**
+**Nu continua la Pas 5 fără confirmare explicită pe script.**
 
-## Pas 3: Avertizare cost și confirmare
+## Pas 5: Avertizare cost și confirmare
 
-Calculează costul estimat înainte de generare:
+Calculează costul estimat:
 
 ```
-Minute video = număr cuvinte ÷ 150
-Secunde video = minute × 60
-Cost Avatar III Photo  = secunde × $0.043  ← default recomandat
-Cost Avatar III Twin   = secunde × $0.017  ← cel mai ieftin
-Cost Avatar IV Photo   = secunde × $0.05   ← calitate mai bună
-Cost Avatar IV Twin    = secunde × $0.067  ← calitate maximă
+Secunde video ≈ (număr cuvinte ÷ 150) × 60
+Cost Avatar IV (default) = secunde × $0.043
+Cost Avatar V            = secunde × $0.067
+Cost Avatar III          = secunde × $0.017  ← cel mai ieftin
 ```
 
-Trimite utilizatorului calculul explicit:
+Trimite calculul:
 > "Script de [N] cuvinte = ~[M] secunde video.
-> Cost estimat: ~$[X] cu Avatar III Photo (recomandat) sau ~$[Y] cu Avatar IV.
-> Continui cu [avatar ales]?"
+> Cost estimat: ~$[X] cu Avatar IV (recomandat).
+> Continui?"
 
-Așteaptă confirmarea. **Nu genera fără confirmare explicită.**
+**Nu genera fără confirmare explicită.**
 
-Dacă utilizatorul răspunde "nu": întreabă "Vrei să scurtăm scriptul, alegem un avatar mai ieftin sau oprim?" Nu continua cu generarea.
-
-## Pas 4: Execuție
+## Pas 6: Execuție
 
 ```bash
 cd "${CTX_AGENT_DIR}"
@@ -122,54 +130,53 @@ OUTPUT_SLUG="heygen-$(date +%Y%m%d-%H%M%S)"
 OUTPUT_DIR="/tmp/nova-video/${OUTPUT_SLUG}"
 mkdir -p "${OUTPUT_DIR}"
 
-python3 .claude/skills/vid-avatar-heygen/scripts/heygen_video.py \
-  "<script_text>" \
+python3 .claude/skills/vid-avatar-heygen/scripts/heygen_v3.py generate \
+  "<SCRIPT_TEXT>" \
   "${OUTPUT_DIR}/heygen-1.mp4" \
-  --avatar <avatar_id> \
-  --voice <voice_id> \
-  --aspect <ratio_din_brand_catalog>
+  --avatar <LOOK_ID> \
+  --voice <VOICE_ID> \
+  --aspect <RATIO_DIN_BRAND_SAU_9:16> \
+  --resolution 1080p \
+  --locale ro-RO \
+  --expressiveness high \
+  --motion-prompt "looking at camera, speaking naturally with hand gestures" \
+  [--background-color "#HEX"] \
+  [--background-image "URL"]
 ```
 
-Parsează output-ul JSON returnat de script. Extrage:
-- `output_path` — calea fișierului generat
-- `video_id` — ID-ul sesiunii HeyGen (util pentru debug)
-- `duration_s` — durata reală a clipului în secunde
+Parsează JSON returnat. Extrage `output_path`, `video_id`, `duration_s`.
+Dacă conține `"error"` → raportează eroarea completă și oprește.
 
-Dacă output-ul conține `"error"`, raportează eroarea completă și oprește.
-
-## Pas 5: Self-QA și livrare
-
-Verifică fișierul generat:
+## Pas 7: Self-QA și livrare
 
 ```bash
 FILE_SIZE=$(du -k "${OUTPUT_DIR}/heygen-1.mp4" 2>/dev/null | cut -f1)
-echo "Dimensiune fișier: ${FILE_SIZE}KB"
+echo "Dimensiune: ${FILE_SIZE}KB"
 ```
 
 Criterii de acceptare:
-- Fișierul există: da/nu
-- Dimensiune > 100KB: da/nu (sub 100KB = generare eșuată sau clip gol)
-- `duration_s` din JSON corespunde cu estimarea din Pas 3: da/nu
+- Fișierul există și este > 100KB
+- `duration_s` din JSON corespunde estimării din Pas 5
 
 Raportează utilizatorului:
-- Avatar folosit (ID + nume)
-- Durată reală (din `duration_s`)
-- Cost estimat pe baza duratei reale
+- Avatar folosit (ID)
+- Voce folosită (ID + nume)
+- Durată reală
+- Cost estimat pe durata reală (recalculat)
 - Calea completă a fișierului
 
-Întreabă: "Continui cu subtitruri (handoff la vid-ffmpeg-edit) sau uploadăm direct (handoff la tool-video-upload)?"
+Întreabă: "Continui cu subtitruri (vid-ffmpeg-edit) sau uploadăm direct (tool-video-upload)?"
 
 ## Rules
 
 - Avertizarea cost cu calcul explicit este OBLIGATORIE înainte de orice generare
-- Nu genera fără confirmare explicită pe cost
-- Scriptul trebuie prezentat și confirmat înainte de trimitere la API
-- Aspect ratio din `knowledge/brand-video.md`, nu inventat
-- Fișierul video trebuie să existe și să fie > 100KB înainte de livrare
-- La Pas 1, încheie tura după prezentarea avatarelor și vocilor — nu continua fără răspuns
+- Nu genera fără confirmare pe cost și script
+- `--expressiveness high` și `--motion-prompt` sunt ÎNTOTDEAUNA incluse pentru a evita stilul "poza de pașaport"
+- `--locale ro-RO` este ÎNTOTDEAUNA inclus indiferent de vocea aleasă
+- Fișierul trebuie să existe și să fie > 100KB înainte de livrare
+- Dacă `--list-voices --language Romanian` returnează 0 voci, folosește Emil sau Alina din lista hardcodată de mai sus la Pas 2
 
 ## Self-Update
 
-Dacă utilizatorul semnalează o problemă cu output-ul, adaugă în secțiunea Rules o linie cu formatul:
+Dacă utilizatorul semnalează o problemă, adaugă în Rules:
 `- [YYYY-MM-DD] corecție: [descriere scurtă a problemei și soluției]`
-Nu șterge reguli existente. Adaugă doar în josul listei.
