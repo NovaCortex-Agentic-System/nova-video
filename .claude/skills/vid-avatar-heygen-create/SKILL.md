@@ -1,6 +1,6 @@
 ---
 name: vid-avatar-heygen-create
-description: "Creează un avatar persistent din fotografie via HeyGen API. Rulează o singură dată per persoană/brand. Avatarul rezultat (look_id) se salvează în knowledge/brand-video.md și se reutilizează la orice video ulterior via vid-avatar-heygen."
+description: "Creează un avatar persistent din fotografie via HeyGen CLI. Rulează o singură dată per persoană/brand. Avatarul rezultat (look_id) se salvează în knowledge/brand-video.md și se reutilizează la orice video ulterior via vid-avatar-heygen."
 triggers:
   - "creează avatar heygen"
   - "avatar din poză"
@@ -15,27 +15,21 @@ context_loads:
 outputs:
   - look_id salvat în knowledge/brand-video.md
 runtime_dependencies:
-  - python3
-  - requests (pip install requests)
+  - heygen CLI (curl -fsSL https://static.heygen.ai/cli/install.sh | bash)
 ---
 
 # Skill: Creare Avatar Persistent HeyGen
 
-Creează un Photo Avatar persistent din fotografie și îl salvează în catalogul de branduri pentru reutilizare la toate video-urile viitoare.
-
 ## Pas 0: Verifică dacă avatarul există deja
 
-Citește `knowledge/brand-video.md`. Dacă brandul menționat are deja un câmp `heygen_look_id` completat, NU crea un avatar nou.
+Citește `knowledge/brand-video.md`. Dacă brandul are deja `heygen_look_id`:
+> "Brandul [NUME] are deja avatarul configurat (look_id: [ID]). Folosim acesta sau creăm unul nou?"
 
-Mesaj utilizator:
-> "Brandul [NUME] are deja avatarul configurat (look_id: [ID]). Îl folosim pe acesta sau vrei să creezi unul nou cu o altă fotografie?"
-
-Dacă vrea să continue cu cel existent → handoff la `vid-avatar-heygen`.
+Dacă vrea cel existent → handoff la `vid-avatar-heygen`.
 Dacă vrea unul nou → continuă la Pas 1.
 
 ## Pas 1: Primește fotografia
 
-Cere utilizatorului:
 > "Trimite fotografia pentru avatar. Cerințe HeyGen:
 > - Format: JPG sau PNG
 > - Față vizibilă, față spre cameră, fără ochelari de soare
@@ -44,32 +38,39 @@ Cere utilizatorului:
 >
 > Trimite un URL public al fotografiei."
 
-Dacă utilizatorul trimite un fișier local via Telegram → fotografia ajunge cu `local_file:` în mesaj. Uploadează-o pe Zernio via skill-ul `tool-video-upload` pentru a obține un URL public, apoi continuă cu URL-ul.
+Dacă utilizatorul trimite fișier local via Telegram → uploadează pe Zernio via `tool-video-upload` pentru URL public, apoi continuă.
 
-**ÎNCHEIE TURA** — nu continua fără URL fotografiei.
+**ÎNCHEIE TURA** — nu continua fără URL confirmat.
 
 ## Pas 2: Primește denumirea avatarului
 
-Cere:
-> "Cum denumim avatarul? (ex: 'Dan Mitruț — Trainer', 'Maria — Sales', 'Avatar Brand X')"
+> "Cum denumim avatarul? (ex: 'Dan Mitruț — Trainer', 'Maria — Sales')"
 
 **ÎNCHEIE TURA** — nu continua fără denumire.
 
-## Pas 3: Creează avatarul
+## Pas 3: Uploadează fotografia ca asset și creează avatarul
 
 ```bash
 cd "${CTX_AGENT_DIR}"
 set -a; source .env; set +a
 
-python3 .claude/skills/vid-avatar-heygen/scripts/heygen_v3.py \
-  --create-avatar \
-  --avatar-name "<DENUMIRE>" \
-  --avatar-photo-url "<URL_FOTOGRAFIE>"
+# Pasul 3a: Creează avatarul (photo_avatar din URL public)
+RESULT=$(heygen avatar create -d '{
+  "name": "<DENUMIRE>",
+  "type": "photo",
+  "image": {"type": "url", "url": "<URL_FOTOGRAFIE>"}
+}')
 ```
 
-Parsează JSON-ul returnat:
-- Dacă conține `"error"` → raportează eroarea completă și oprește.
-- Dacă `"status": "ok"` → extrage `look_id` și `group_id` din output.
+Dacă CLI-ul `avatar create` nu suportă `-d` (verifică cu `heygen avatar create --help`), folosește schema:
+```bash
+heygen avatar create --request-schema
+```
+și adaptează comanda conform schemei returnate.
+
+Parsează răspunsul JSON:
+- Dacă conține `"error"` → raportează eroarea completă și oprește
+- Dacă `"status": "ok"` sau similar → extrage `look_id` și `group_id`
 
 ## Pas 4: Salvează în catalog
 
@@ -83,12 +84,12 @@ cat >> "${CTX_AGENT_DIR}/knowledge/brand-video.md" << EOF
 EOF
 ```
 
-Raportează utilizatorului:
+Raportează:
 > "Avatar creat cu succes!
 > - Nume: [DENUMIRE]
 > - look_id: [LOOK_ID]
 >
-> Salvat în catalogul de branduri. Poți genera acum un video cu:
+> Salvat în catalog. Poți genera acum un video cu:
 > 'video cu avatar [DENUMIRE] care spune [SUBIECT]'"
 
 ## Rules
@@ -98,8 +99,9 @@ Raportează utilizatorului:
 - Salvează ÎNTOTDEAUNA look_id în knowledge/brand-video.md după creare reușită
 - Nu continua la Pas 3 fără denumire confirmată
 - La eroare API, raportează răspunsul complet — nu interpreta, nu presupune
+- Dacă `heygen avatar create` nu suportă `--type photo` direct, rulează `--request-schema` și adaptează
 
 ## Self-Update
 
 Dacă utilizatorul semnalează o problemă, adaugă în Rules:
-`- [YYYY-MM-DD] corecție: [descriere scurtă a problemei și soluției]`
+`- [YYYY-MM-DD] corecție: [descriere scurtă]`
